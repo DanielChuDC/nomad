@@ -92,10 +92,9 @@ func TestVolumeWatch_Checkpoint(t *testing.T) {
 	// step-up again
 	watcher.SetEnabled(true, srv.State())
 	require.Eventually(func() bool {
-		return 1 == len(watcher.watchers)
+		return 1 == len(watcher.watchers) &&
+			!watcher.watchers[vol.ID+vol.Namespace].isRunning()
 	}, time.Second, 10*time.Millisecond)
-
-	require.True(watcher.watchers[vol.ID+vol.Namespace].isRunning())
 }
 
 // TestVolumeWatch_StartStop tests the start and stop of the watcher when
@@ -141,11 +140,11 @@ func TestVolumeWatch_StartStop(t *testing.T) {
 	err = srv.State().CSIVolumeRegister(index, []*structs.CSIVolume{vol})
 	require.NoError(err)
 
-	// assert we get a running watcher
+	// assert we get a watcher; there are no claims so it should immediately stop
 	require.Eventually(func() bool {
-		return 1 == len(watcher.watchers)
+		return 1 == len(watcher.watchers) &&
+			!watcher.watchers[vol.ID+vol.Namespace].isRunning()
 	}, time.Second, 10*time.Millisecond)
-	require.True(watcher.watchers[vol.ID+vol.Namespace].isRunning())
 
 	// claim the volume for both allocs
 	claim := &structs.CSIVolumeClaim{
@@ -170,7 +169,6 @@ func TestVolumeWatch_StartStop(t *testing.T) {
 	index++
 	err = srv.State().CSIVolumeClaim(index, vol.Namespace, vol.ID, claim)
 	require.NoError(err)
-	require.True(watcher.watchers[vol.ID+vol.Namespace].isRunning())
 
 	// alloc becomes terminal
 	alloc.ClientStatus = structs.AllocClientStatusComplete
@@ -189,7 +187,9 @@ func TestVolumeWatch_StartStop(t *testing.T) {
 		return len(vol.ReadAllocs) == 1 && len(vol.PastClaims) == 0
 	}, time.Second*2, 10*time.Millisecond)
 
-	require.True(watcher.watchers[vol.ID+vol.Namespace].isRunning())
+	require.Eventually(func() bool {
+		return !watcher.watchers[vol.ID+vol.Namespace].isRunning()
+	}, time.Second*1, 10*time.Millisecond)
 
 	// the watcher will have incremented the index so we need to make sure
 	// our inserts will trigger new events
